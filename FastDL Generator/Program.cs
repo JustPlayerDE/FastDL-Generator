@@ -127,7 +127,7 @@ namespace FastDL_Generator
             Directory.Delete(newFile); // hacky way
             try
             {
-                File.Copy(oldFile, newFile);
+                File.Copy(oldFile, newFile, true);
             }
             catch (Exception)
             {
