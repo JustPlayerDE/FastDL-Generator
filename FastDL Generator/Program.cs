@@ -226,7 +226,6 @@ namespace FastDL_Generator
             }
 
             Console.WriteLine("Done");
-            Console.ReadKey();
             return 0;
         }
         
