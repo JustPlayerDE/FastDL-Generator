@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
 using ICSharpCode.SharpZipLib.BZip2;
@@ -9,194 +10,236 @@ namespace FastDL_Generator
     class Program
     {
 
-        public static void Main(string[] args)
+        public static int Main(string[] args)
         {
             Console.Title = "FastDL Generator";
-            int RunningTasks = 0;
-            int MaxTasks = 2;
-            int HardLimit = 4;
-            // Define Filetypes
             string[] SearchFor = new string[] {
-                "materials/*.vmt",
-                "materials/*.vtf",
-                "materials/*.png",
-                "materials/*.gif",
-                "materials/*.jpg",
-                "sound/*.wav",
-                "sound/*.mp3",
-                "sound/*.ogg",
-                "maps/*.bsp",
-                "maps/graphs/*.ain",
-                "models/*.mdl",
-                "models/*.vtx",
-                "models/*.dx80.vtx",
-                "models/*.dx90.vtf",
-                "models/*.xbox.vtx",
-                "models/*.sw.vtx",
-                "models/*.vvd",
-                "models/*.phy",
-                "resource/*.ttf",
-                "particles/*.pcf"
+                "materials\\*.vmt",
+                "materials\\*.vtf",
+                "materials\\*.png",
+                "materials\\*.gif",
+                "materials\\*.jpg",
+                "sound\\*.wav",
+                "sound\\*.mp3",
+                "sound\\*.ogg",
+                "maps\\*.bsp",
+                "maps\\graphs\\*.ain",
+                "models\\*.mdl",
+                "models\\*.vtx",
+                "models\\*.dx80.vtx",
+                "odels\\*.dx90.vtf",
+                "models\\*.xbox.vtx",
+                "models\\*.sw.vtx",
+                "models\\*.vvd",
+                "models\\*.phy",
+                "resource\\*.ttf",
+                "particles\\*.pcf"
             };
+            string Path = "";
+            string PathOutput = "";
+            int Threads = 24;
+            int RunningThreads = 0;
 
-            // Setting mainpath if arg[0] (first argument given to programm) is set
-            string MainPath;
-            try
+            // Parsing arguments
+            if(args.Length == 0)
             {
-                MainPath = args[0];
-            }
-            catch (Exception)
+                Console.WriteLine("Usage: ");
+                Console.WriteLine("fastdlgen.exe <path to addon dir> (output path) (Threads) (-c)");
+                Console.WriteLine("If no output path is given it will be put into '<path to addon dir>/upload_dir'");
+                Console.WriteLine("If no amount of Threads are given it will default to 2 threads.");
+                Console.WriteLine("The Output directory will always be cleaned.");
+
+                return 1;
+            } else
             {
-                Console.WriteLine("Please add a Path as first arg");
-                return;
-            }
-
-            // Same as above but instead quitting just set default path as the target path
-            string copyPath = MainPath + "/../FastDL_Upload/";
-            try
-            {
-                if (Directory.Exists(args[1]))
-                    copyPath = args[1];
-            }
-            catch (Exception) { }
-
-            // if it exists Clear it because we need a clear folder
-            if (Directory.Exists(copyPath))
-            {
-                Directory.Delete(copyPath, true);
-            }
-
-            if (!Directory.Exists(MainPath))
-            {
-                Console.WriteLine("The given path doesnt exists: {0}", MainPath);
-                return;
-            }
-
-
-            List<string> IndexedFiles = new List<string>();
-
-            // Indexing files 
-            foreach (var Type in SearchFor)
-            {
-                string[] Data = TreeScan(MainPath, Type);
-                foreach (var item in Data)
+                // Input path
+                if (Directory.Exists(args[0]))
                 {
-                    IndexedFiles.Add(item.Substring(MainPath.Length + 1).Replace('\\', '/'));
-                }
-            }
-
-            if(IndexedFiles.Count > 2000) 
-            {
-                MaxTasks = IndexedFiles.Count / 1000;
-                if(MaxTasks > HardLimit)
+                    Path = args[0];
+                    Console.WriteLine($"Using {Path} as source.");
+                    PathOutput = $"{Path}/upload_dir";
+                } else
                 {
-                    MaxTasks = 4;
+                    Console.WriteLine($"{Path} was not found!");
+                    return 1;
                 }
+
+
+                // Output path
+                if (args.Length >= 2)
+                {
+                    try
+                    {
+                        PathOutput = args[1];
+                    } catch(Exception) { }
+                }
+                // Clean it up before use.
+                if (Directory.Exists(PathOutput))
+                {
+                    try
+                    {
+                        Directory.Delete(PathOutput, true);
+                    }
+                    catch (Exception)
+                    {
+                        Console.WriteLine($"Error creating {PathOutput}: Could not delete existing directory for cleanup.");
+                        return 1;
+                    }
+                }
+
+                try
+                {
+                    Directory.CreateDirectory(PathOutput);
+                } catch(Exception e)
+                {
+                    Console.WriteLine($"Error creating {PathOutput}: {e.Message}");
+                    return 1;
+                }
+                Console.WriteLine($"Using {PathOutput} as output.");
+
+                // Threads
+                if (args.Length >= 3)
+                {
+                    try
+                    {
+                        Threads = Int32.Parse(args[2]);
+                    }
+                    catch (Exception) { }
+                }
+                Console.WriteLine($"Using {Threads} Threads.");
             }
 
             // Define first 2 lines for fastdl.lua
             string FileData = "// fastdl.lua generated by FastDL Generator.\n" +
                                 "if (SERVER) then\n";
 
-            // While copy files to target folder add line to File
-            foreach (var item in IndexedFiles)
+            // Indexing Files for copy
+            var CopyQueue = new ConcurrentQueue<string>();
+            var CompressQueue = new ConcurrentQueue<string>();
+
+            foreach (var Type in SearchFor)
             {
-                Console.WriteLine("Copy > " + item);
-                FileData = FileData + " resource.AddFile(\"" + item + "\")\n";
-                CopyFile(item, MainPath, copyPath);
+                string[] Data = TreeScan(Path, Type);
+                foreach (var item in Data)
+                {
+                    string path = item.Substring(Path.Length + 1).Replace('\\', '/');
+                    CopyQueue.Enqueue(path);
+                    CompressQueue.Enqueue(path);
+                    FileData = FileData + " resource.AddFile(\"" + path + "\")\n";
+                }
             }
 
-            // and the end
-            FileData = FileData + "end";
+            Console.WriteLine($"Found {CopyQueue.Count} files to copy.");
+            FileData = FileData + "end"; // Done i guess
+            File.WriteAllText(PathOutput + "/fastdl.lua", FileData);
 
 
-            // Bzip2 any file in the Index (in the target folder)
-            Console.Title = "Bzipping...";
+            // Copy files
+            for (int i = 0; i < Threads; i++)
+            {
+                Thread temp = new Thread(new ThreadStart(ThreadedCopy));
+                temp.Start();
+                RunningThreads++;
+                Console.WriteLine("Thread #{0} Started", temp.ManagedThreadId);
+            }
 
-            // Because the threads should NOT try to edit the same files at the same time ever
-            List<string> ChangedFiles = new List<string> { };
-            List<Thread> CurrentThreads = new List<Thread> { };
+            // Lazy way of waiting for threads i guess but it works
+            while (RunningThreads > 0) {
+                Thread.Sleep(10);
+            }
 
-            for (int i = 0; i < MaxTasks; i++)
+            Console.WriteLine("Compressing files...");
+
+            // Compress files
+            for (int i = 0; i < Threads; i++)
             {
                 Thread temp = new Thread(new ThreadStart(ThreadedCompressing));
                 temp.Start();
-                Console.WriteLine("Thread #{0} Started", i);
-                CurrentThreads.Add(temp);
-                RunningTasks++;
+                RunningThreads++;
+                Console.WriteLine("Thread #{0} Started", temp.ManagedThreadId);
+            }
+
+            // Lazy way of waiting for threads i guess but it works
+            while (RunningThreads > 0)
+            {
+                Thread.Sleep(100);
+            }
+
+            void ThreadedCopy()
+            {
+                string currentFile;
+                while (CopyQueue.TryDequeue(out currentFile))
+                {
+                    if (!Directory.Exists(PathOutput + "/" + currentFile))
+                    {
+                        try
+                        {
+                            Directory.CreateDirectory(PathOutput + "/" + currentFile);
+                            Directory.Delete(PathOutput + "/" + currentFile); // hacky way
+                        }
+                        catch (Exception) { } // Ignore that
+                    }
+
+                    // Copy file into new directory
+                    try
+                    {
+                        File.Copy($"{Path}/{currentFile}", $"{PathOutput}/{currentFile}", true);
+                        Console.WriteLine($"#{Thread.CurrentThread.ManagedThreadId} Copied: {Path}/{currentFile}");
+                    }
+                    catch (Exception)
+                    {
+                        Console.WriteLine($"Error at Copy:\n{Path}/{currentFile} >>> {PathOutput}/{currentFile}");
+                    }
+                    Console.Title = $"FastDL Generator ({CopyQueue.Count} items in queue, {RunningThreads}/{Threads} Threads active)";
+                }
+                RunningThreads--;
+                Console.WriteLine($"Thread {Thread.CurrentThread.ManagedThreadId} Stopped");
             }
 
             void ThreadedCompressing()
             {
-                long Edited = 0;
-                foreach (string item in IndexedFiles)
+                string currentFile;
+                while(CompressQueue.TryDequeue(out currentFile))
                 {
-                    if (!ChangedFiles.Contains(item))
-                    {
-                        ChangedFiles.Add(item);
-                        Edited++;
-                    } else
-                    {
-                        // if (ChangedFiles.Contains(item)) Console.WriteLine("        >>>Item: <" + item + "> Already changed..");
-                        continue;
-                    }
+                    string filePath = PathOutput + "/" + currentFile;
+
                     try
                     {
-                        string Path = copyPath + "/" + item;
-
-
-                        if (File.Exists(Path) )
+                        if (File.Exists(filePath))
                         {
-                            Console.WriteLine("compressing > " + item);
-                            BzipFile(Path);
-
-                            Console.Title = " Compressed "+ChangedFiles.Count+" / "+IndexedFiles.Count+" Files, Running Threads: "+CurrentThreads.Count;
+                            Console.WriteLine($"#{Thread.CurrentThread.ManagedThreadId} Compressing: {currentFile}");
+                            BzipFile(filePath);
+                        }
+                    } catch(Exception e)
+                    {
+                        Console.WriteLine($"#{Thread.CurrentThread.ManagedThreadId} Error: {e.Message}");
+                        CompressQueue.Enqueue(currentFile);
+                        if(File.Exists(filePath + ".bzip"))
+                        {
+                            File.Delete(filePath + ".bzip"); // At least dont download broken files
                         }
                     }
-                    catch (Exception)
-                    {
-                        
-                    }
+                    Console.Title = $"FastDL Generator ({CompressQueue.Count} items in queue, {RunningThreads}/{Threads} Threads active)";
                 }
-                RunningTasks--;
-                Console.WriteLine("Thread Killed with {0} compressed files. {1} Threads remaining please be patient...", Edited,RunningTasks);
-                if(RunningTasks <= 0)
-                {
-                    Console.WriteLine("All Threads Killed, Generator closed");
-
-                    // Save the fastdl.lua in the target folder
-                    File.WriteAllText(copyPath + "/fastdl.lua", FileData);
-                }
+                RunningThreads--;
+                Console.WriteLine($"Thread {Thread.CurrentThread.ManagedThreadId} Stopped");
             }
 
+            Console.WriteLine("Done");
+            Console.ReadKey();
+            return 0;
         }
         
-
-        private static void CopyFile(string Filee,string oldFolder, string NewFolder)
-        {
-            string oldFile = oldFolder+"/"+ Filee;
-            string newFile = NewFolder+"/"+ Filee;
-            Directory.CreateDirectory(newFile);
-            Directory.Delete(newFile); // hacky way
-            try
-            {
-                File.Copy(oldFile, newFile, true);
-            }
-            catch (Exception)
-            {
-                Console.WriteLine("Error at Copy:\n" + oldFile + " >>> " + newFile);
-            }
-        }
         
         private static string[] TreeScan(string mainDir, string search)
         {
             try
             {
-                return Directory.GetFiles(mainDir, search, SearchOption.AllDirectories);
+              return Directory.GetFiles(mainDir, search, SearchOption.AllDirectories);
             }
             catch (Exception)
             {
-                return new string[] { };
+              return new string[] { };
             }
 
         }
@@ -216,7 +259,7 @@ namespace FastDL_Generator
                     try
                     {
                         BZip2.Compress(fileToBeZippedAsStream, zipTargetAsStream, true, 4096);
-                        System.IO.File.Delete(Path);
+                        File.Delete(Path);
                     }
                     catch (Exception ex)
                     {
