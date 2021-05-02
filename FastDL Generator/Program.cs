@@ -44,7 +44,7 @@ namespace FastDL_Generator
             if(args.Length == 0)
             {
                 Console.WriteLine("Usage: ");
-                Console.WriteLine("fastdlgen.exe <path to addon dir> (output path) (Threads) (-c)");
+                Console.WriteLine("fastdlgen.exe <path to addon dir> (output path) (Threads)");
                 Console.WriteLine("If no output path is given it will be put into '<path to addon dir>/upload_dir'");
                 Console.WriteLine("If no amount of Threads are given it will default to 2 threads.");
                 Console.WriteLine("The Output directory will always be cleaned.");
