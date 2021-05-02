@@ -37,7 +37,7 @@ namespace FastDL_Generator
             };
             string Path = "";
             string PathOutput = "";
-            int Threads = 2;
+            int Threads = Math.Max(Environment.ProcessorCount - 2, 2);
             int RunningThreads = 0;
 
             // Parsing arguments
@@ -46,7 +46,7 @@ namespace FastDL_Generator
                 Console.WriteLine("Usage: ");
                 Console.WriteLine("fastdlgen.exe <path to addon dir> (output path) (Threads)");
                 Console.WriteLine("If no output path is given it will be put into '<path to addon dir>/upload_dir'");
-                Console.WriteLine("If no amount of Threads are given it will default to 2 threads.");
+                Console.WriteLine($"If no amount of Threads are given it will default to {Threads} threads.");
                 Console.WriteLine("The Output directory will always be cleaned.");
 
                 return 1;
