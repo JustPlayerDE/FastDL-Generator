@@ -37,7 +37,7 @@ namespace FastDL_Generator
             };
             string Path = "";
             string PathOutput = "";
-            int Threads = 24;
+            int Threads = 2;
             int RunningThreads = 0;
 
             // Parsing arguments
